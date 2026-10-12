@@ -95,4 +95,10 @@ class WriteCommand(FsCommand):
 
 
 def register(kernel):
-    return [LsCommand(), MkdirCommand(), TouchCommand(), CatCommand(), WriteCommand()]
+    return [
+        LsCommand(),
+        MkdirCommand(),
+        TouchCommand(),
+        CatCommand(),
+        WriteCommand(),
+    ]
