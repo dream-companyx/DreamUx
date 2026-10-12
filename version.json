@@ -1,6 +1,6 @@
 {
   "name": "DreamUX Core",
-  "version": "1.0.0",
+  "version": "2.5.0",
   "updated_at": "2026-10-12",
   "notes": "Первый релиз: ядро + плагины + RemoteTools + Updater"
 }
