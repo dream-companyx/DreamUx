@@ -61,14 +61,7 @@ class PluginsCommand(Command):
         print()
 
 
-def slash_about(kernel, args):
-    print("SimpleOS v1.0 — учебная консольная ОС.")
-    print("Плагины регистрируют команды, /команды и интерфейсы.")
-
-
 def register(kernel):
-    kernel.register_slash_command("about", slash_about, "о системе") \
-        if hasattr(kernel, "register_slash_command") else None
     return [
         HelpCommand(),
         EchoCommand(),
