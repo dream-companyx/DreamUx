@@ -1,19 +1,16 @@
 """
-RemoteTools — утилита обслуживания DreamUX.
-Резервное копирование, восстановление, сброс компонентов.
+RemoteTools — снапшоты, восстановление, сброс.
 Запуск: /remote [команда]
 """
 
 import os
-import sys
 import shutil
 import datetime
-import json
 import zipfile
+
 from plugins.base import Interface
 
 
-# ---------- Пути ----------
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 KERNEL_DIR = os.path.dirname(PLUGIN_DIR)
 SNAPSHOTS_DIR = os.path.join(KERNEL_DIR, "snapshots")
@@ -22,7 +19,6 @@ GNOME_DIR = os.path.join(PLUGIN_DIR, "gnome_gui")
 LOGS_DIR = os.path.join(GNOME_DIR, "logs")
 CONFIG_DIR = os.path.join(KERNEL_DIR, "config")
 AVDB_DIR = os.path.join(KERNEL_DIR, "avdb")
-
 
 COMPONENTS = {
     "sandbox":   SANDBOX_DIR,
@@ -67,45 +63,27 @@ def _safe_rmtree(path):
         shutil.rmtree(path, ignore_errors=True)
 
 
-# ============================================================
-# Действия RemoteTools
-# ============================================================
-
 def rt_status():
-    """Показать состояние всех компонентов."""
     print("\n" + "=" * 60)
     print("  RemoteTools — Состояние DreamUX")
     print("=" * 60)
-    print(f"  Корень:    {KERNEL_DIR}")
-    print(f"  Снапшоты:  {SNAPSHOTS_DIR}")
-    print()
-    print(f"  {'Компонент':<14} {'Размер':<12} {'Статус':<10} {'Путь'}")
-    print("  " + "-" * 58)
     for name, path in COMPONENTS.items():
         if os.path.isdir(path):
             size = _human_size(_dir_size(path))
-            status = "✅ OK"
+            print(f"  {name:<14} {size:<12} OK")
         else:
-            size = "—"
-            status = "⛔ НЕТ"
-        print(f"  {name:<14} {size:<12} {status:<10} {path}")
+            print(f"  {name:<14} {'—':<12} НЕТ")
 
-    # Снапшоты
     _ensure_snapshots()
     snaps = sorted(os.listdir(SNAPSHOTS_DIR))
     print(f"\n  Снапшоты ({len(snaps)}):")
-    if not snaps:
-        print("    (нет)")
-    else:
-        for s in snaps[-10:]:
-            p = os.path.join(SNAPSHOTS_DIR, s)
-            size = _human_size(_dir_size(p))
-            print(f"    • {s}  ({size})")
-    print("=" * 60 + "\n")
+    for s in snaps[-10:]:
+        p = os.path.join(SNAPSHOTS_DIR, s)
+        print(f"    • {s}  ({_human_size(_dir_size(p))})")
+    print()
 
 
 def rt_backup(component="full"):
-    """Создать снапшот. component = 'full' | 'sandbox' | 'logs' | 'config' | 'avdb' | 'gnome_gui'."""
     _ensure_snapshots()
     ts = _ts()
 
@@ -116,123 +94,67 @@ def rt_backup(component="full"):
             if os.path.isdir(path):
                 try:
                     shutil.copytree(path, os.path.join(dst, name))
-                    print(f"[RemoteTools] ✅ {name} → {dst}/{name}")
+                    print(f"[RemoteTools] {name} → OK")
                 except Exception as e:
-                    print(f"[RemoteTools] ⛔ {name}: {e}")
+                    print(f"[RemoteTools] {name}: {e}")
         print(f"[RemoteTools] Полный снапшот: {dst}")
         return dst
 
     if component not in COMPONENTS:
-        print(f"[RemoteTools] Неизвестный компонент: {component}")
-        print(f"Доступно: full, {', '.join(COMPONENTS)}")
+        print(f"[RemoteTools] Неизвестный: {component}")
         return None
 
     src = COMPONENTS[component]
     if not os.path.isdir(src):
-        print(f"[RemoteTools] ⛔ Компонент не найден: {src}")
+        print(f"[RemoteTools] Не найден: {src}")
         return None
 
     dst = os.path.join(SNAPSHOTS_DIR, f"{component}_{ts}")
     try:
         shutil.copytree(src, dst)
-        print(f"[RemoteTools] ✅ Снапшот {component}: {dst}")
+        print(f"[RemoteTools] Снапшот: {dst}")
         return dst
     except Exception as e:
-        print(f"[RemoteTools] ⛔ {component}: {e}")
+        print(f"[RemoteTools] {e}")
         return None
 
 
-def rt_restore(component, snapshot_name):
-    """Восстановить компонент из указанного снапшота."""
-    _ensure_snapshots()
-    snap_dir = os.path.join(SNAPSHOTS_DIR, snapshot_name)
-    if not os.path.isdir(snap_dir):
-        print(f"[RemoteTools] ⛔ Снапшот не найден: {snapshot_name}")
-        return False
-
-    if component not in COMPONENTS:
-        print(f"[RemoteTools] ⛔ Неизвестный компонент: {component}")
-        return False
-
-    # Источник данных в снапшоте
-    if snapshot_name.startswith("full_"):
-        src = os.path.join(snap_dir, component)
-    else:
-        src = snap_dir
-
-    if not os.path.isdir(src):
-        print(f"[RemoteTools] ⛔ В снапшоте нет '{component}': {src}")
-        return False
-
-    dst = COMPONENTS[component]
-
-    # Удаляем старое и копируем новое
-    _safe_rmtree(dst)
-    try:
-        shutil.copytree(src, dst)
-        print(f"[RemoteTools] ✅ Восстановлено {component} из {snapshot_name}")
-        return True
-    except Exception as e:
-        print(f"[RemoteTools] ⛔ Восстановление {component}: {e}")
-        return False
-
-
 def rt_reset(component):
-    """Сбросить компонент (пересоздать с нуля)."""
     if component == "full":
         for name in COMPONENTS:
             rt_reset(name)
         return
-
     if component not in COMPONENTS:
-        print(f"[RemoteTools] ⛔ Неизвестный компонент: {component}")
-        print(f"Доступно: full, {', '.join(COMPONENTS)}")
+        print(f"[RemoteTools] Неизвестный: {component}")
         return
-
     path = COMPONENTS[component]
-    print(f"[RemoteTools] Сброс {component} ({path})...")
     _safe_rmtree(path)
     os.makedirs(path, exist_ok=True)
-    print(f"[RemoteTools] ✅ {component} сброшен")
+    print(f"[RemoteTools] {component} сброшен")
 
 
 def rt_list():
-    """Список снапшотов."""
     _ensure_snapshots()
-    print(f"\n  Снапшоты в {SNAPSHOTS_DIR}:")
-    snaps = sorted(os.listdir(SNAPSHOTS_DIR))
-    if not snaps:
-        print("    (нет)")
-        return
-    for s in snaps:
+    for s in sorted(os.listdir(SNAPSHOTS_DIR)):
         p = os.path.join(SNAPSHOTS_DIR, s)
-        size = _human_size(_dir_size(p))
-        print(f"    • {s}  ({size})")
-    print()
+        print(f"  • {s}  ({_human_size(_dir_size(p))})")
 
 
 def rt_clean(keep=5):
-    """Удалить старые снапшоты, оставить последние keep."""
     _ensure_snapshots()
     snaps = sorted(os.listdir(SNAPSHOTS_DIR))
     if len(snaps) <= keep:
         print(f"[RemoteTools] Снапшотов {len(snaps)}, чистить нечего.")
         return
-    to_remove = snaps[:-keep]
-    for s in to_remove:
-        p = os.path.join(SNAPSHOTS_DIR, s)
-        _safe_rmtree(p)
-        print(f"[RemoteTools] 🗑 Удалён: {s}")
-    print(f"[RemoteTools] Оставлено: {keep} последних.")
+    for s in snaps[:-keep]:
+        _safe_rmtree(os.path.join(SNAPSHOTS_DIR, s))
+        print(f"[RemoteTools] Удалён: {s}")
 
 
 def rt_export():
-    """Экспорт полного снапшота в zip."""
     _ensure_snapshots()
     ts = _ts()
     zip_path = os.path.join(SNAPSHOTS_DIR, f"dreamux_backup_{ts}.zip")
-
-    print(f"[RemoteTools] Экспорт в {zip_path}...")
     try:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for name, path in COMPONENTS.items():
@@ -242,30 +164,23 @@ def rt_export():
                             full = os.path.join(root, f)
                             rel = os.path.relpath(full, KERNEL_DIR)
                             zf.write(full, rel)
-        size = _human_size(os.path.getsize(zip_path))
-        print(f"[RemoteTools] ✅ Экспортировано ({size}): {zip_path}")
+        print(f"[RemoteTools] Экспорт: {zip_path}")
     except Exception as e:
-        print(f"[RemoteTools] ⛔ Экспорт: {e}")
+        print(f"[RemoteTools] Экспорт: {e}")
 
-
-# ============================================================
-# Slash-команда /remote
-# ============================================================
 
 def slash_remote(kernel, args):
     if not args:
-        print("RemoteTools — использование:")
+        print("RemoteTools:")
         print("  /remote status")
         print("  /remote list")
         print("  /remote backup [full|sandbox|logs|config|avdb|gnome_gui]")
-        print("  /remote restore <component> <snapshot_name>")
         print("  /remote reset <full|component>")
         print("  /remote clean [N]")
         print("  /remote export")
         return
 
     cmd = args[0].lower()
-
     if cmd == "status":
         rt_status()
     elif cmd == "list":
@@ -273,15 +188,8 @@ def slash_remote(kernel, args):
     elif cmd == "backup":
         comp = args[1] if len(args) > 1 else "full"
         rt_backup(comp)
-    elif cmd == "restore":
-        if len(args) < 3:
-            print("Использование: /remote restore <component> <snapshot>")
-            return
-        rt_restore(args[1], args[2])
     elif cmd == "reset":
         comp = args[1] if len(args) > 1 else "full"
-        print(f"[RemoteTools] Сброс '{comp}'. Продолжить? Введите y/n:")
-        # Простая проверка: сразу сбрасываем, но предупреждаем
         rt_reset(comp)
     elif cmd == "clean":
         n = int(args[1]) if len(args) > 1 and args[1].isdigit() else 5
@@ -289,14 +197,13 @@ def slash_remote(kernel, args):
     elif cmd == "export":
         rt_export()
     else:
-        print(f"[RemoteTools] Неизвестная команда: {cmd}")
-        print("Список: /remote без аргументов")
+        print(f"[RemoteTools] Неизвестная: {cmd}")
 
 
 def register(kernel):
     kernel.register_slash_command(
         "remote",
         slash_remote,
-        "RemoteTools — снапшоты, восстановление, сброс компонентов",
+        "RemoteTools — снапшоты, сброс",
     )
     return []
