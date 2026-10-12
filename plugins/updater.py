@@ -18,8 +18,7 @@ VERSION_FILE = os.path.join(KERNEL_DIR, "version.json")
 
 
 # ---------- Репозитории ----------
-# ЗАМЕНИ "имя-репо-ядра" на реальное имя твоего репозитория ядра
-CORE_BASE = "https://raw.githubusercontent.com/dream-companyx/имя-репо-ядра/main"
+CORE_BASE = "https://raw.githubusercontent.com/dream-companyx/DreamUx/main"
 GUI_BASE = "https://raw.githubusercontent.com/dream-companyx/dreamux_gui/main"
 
 CORE_FILES = {
