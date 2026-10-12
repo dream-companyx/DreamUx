@@ -27,12 +27,12 @@ BASE_URL = "https://raw.githubusercontent.com/dream-companyx/dreamux_gui/main"
 FILES = {
     "gnome_gui.py":        f"{BASE_URL}/gnome_gui.py",
     "browser.py":          f"{BASE_URL}/browser.py",
+    "browser_engine.py":   f"{BASE_URL}/browser_engine.py",   # ← новая
     "games.py":            f"{BASE_URL}/games.py",
     "installers.py":       f"{BASE_URL}/installers.py",
     "splash.py":           f"{BASE_URL}/splash.py",
     "remote_tools_gui.py": f"{BASE_URL}/remote_tools_gui.py",
 }
-
 ASSETS = {
     "assets/dreamux.png": f"{BASE_URL}/assets/dreamux.png",
 }
