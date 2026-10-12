@@ -1,11 +1,4 @@
-"""
-OpenVPN-клиент ядра DreamUX.
-Скачивает os_proxy.ovpn из репозитория DreamUxFourOVPN автоматически.
-
-Пути:
-  конфиги, ключи, .ovpn, .auth  →  ../ovpn/files/
-  логи                          →  ../ovpn/logs/
-"""
+"""OpenVPN-клиент ядра DreamUX."""
 
 import os
 import time
@@ -20,7 +13,6 @@ import urllib.request
 
 PLATFORM = platform.system()
 
-# ---------- Пути ----------
 HERE = os.path.dirname(os.path.abspath(__file__))
 KERNEL_DIR = os.path.dirname(HERE)
 OVPN_DIR = os.path.join(KERNEL_DIR, "ovpn")
@@ -28,10 +20,8 @@ OVPN_FILES = os.path.join(OVPN_DIR, "files")
 OVPN_LOGS = os.path.join(OVPN_DIR, "logs")
 
 
-# ---------- Репозиторий с конфигами VPN ----------
 OVPN_REPO_BASE = "https://raw.githubusercontent.com/dream-companyx/DreamUxFourOVPN/main"
 
-# Что скачать: имя в ovpn/files/ -> URL
 OVPN_DOWNLOADS = {
     "os_proxy.ovpn": f"{OVPN_REPO_BASE}/os_proxy.ovpn",
 }
@@ -69,15 +59,7 @@ def _download(url, dst, force=False):
         return False
 
 
-def _download_all_ovpn(force=False):
-    """Скачивает все .ovpn из репозитория."""
-    for name, url in OVPN_DOWNLOADS.items():
-        dst = os.path.join(OVPN_FILES, name)
-        _download(url, dst, force=force)
-
-
 def _update_missing_ovpn():
-    """Скачивает только отсутствующие .ovpn."""
     for name, url in OVPN_DOWNLOADS.items():
         dst = os.path.join(OVPN_FILES, name)
         if not os.path.isfile(dst):
@@ -85,7 +67,7 @@ def _update_missing_ovpn():
 
 
 class OVPNClient:
-    def __init__(self, log_fn=None, config_name: str = None):
+    def __init__(self, log_fn=None, config_name=None):
         self.log_fn = log_fn or (lambda m: None)
         self.openvpn_path = None
         self.config_path = None
@@ -101,13 +83,9 @@ class OVPNClient:
         self._log_file = os.path.join(OVPN_LOGS, "ovpn.log")
         self._debug_log = os.path.join(OVPN_LOGS, "ovpn-debug.log")
 
-        # Скачиваем конфиги перед первым использованием
-        _update_missing_ovpn()
-
         self._find_openvpn()
         self._find_config(config_name)
 
-    # ---------- Логи ----------
     def _file_log(self, msg, level="INFO"):
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
@@ -120,7 +98,6 @@ class OVPNClient:
         self.log_fn(msg)
         self._file_log(msg, level)
 
-    # ---------- Поиск ----------
     def _find_openvpn(self):
         self.openvpn_path = shutil.which("openvpn")
         if not self.openvpn_path and PLATFORM == "Windows":
@@ -140,7 +117,7 @@ class OVPNClient:
         if self.openvpn_path:
             self.log(f"[OVPN] openvpn: {self.openvpn_path}")
         else:
-            self.log("[OVPN] openvpn не найден — VPN недоступен", "WARN")
+            self.log("[OVPN] openvpn не найден", "WARN")
 
     def _find_config(self, config_name=None):
         if config_name:
@@ -167,7 +144,6 @@ class OVPNClient:
                 self.log(f"[OVPN] Auth: {p}")
                 break
 
-    # ---------- Подключение ----------
     def connect(self) -> bool:
         with self._lock:
             if self.connected:
@@ -176,7 +152,6 @@ class OVPNClient:
                 self.log("[OVPN] openvpn не установлен", "ERROR")
                 return False
 
-            # Повторно проверяем наличие .ovpn
             if not self.config_path or not os.path.isfile(self.config_path):
                 _update_missing_ovpn()
                 self._find_config()
@@ -243,7 +218,7 @@ class OVPNClient:
                 self.connected = True
                 return
             if "AUTH_FAILED" in line:
-                self.log("[OVPN] AUTH_FAILED — неверный логин/пароль", "ERROR")
+                self.log("[OVPN] AUTH_FAILED", "ERROR")
                 return
             if "Cannot open" in line or "Options error" in line:
                 self.log(f"[OVPN] Ошибка конфига: {line.strip()}", "ERROR")
