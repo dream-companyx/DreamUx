@@ -1,10 +1,4 @@
-"""
-Мост к антивирусу главной ОС.
-Windows → Windows Defender (MpCmdRun.exe)
-Linux   → ClamAV
-macOS   → не поддерживается
-Fallback → встроенный antivirus.py
-"""
+"""Мост к антивирусу главной ОС."""
 
 import os
 import shutil
@@ -45,14 +39,6 @@ class AVBridge:
                         return {"name": "Windows Defender",
                                 "path": os.path.join(root, "MpCmdRun.exe"),
                                 "type": "defender"}
-            for name, path in [
-                ("Kaspersky", r"C:\Program Files (x86)\Kaspersky Lab"),
-                ("Dr.Web",    r"C:\Program Files\DrWeb"),
-                ("Avast",     r"C:\Program Files\Avast Software"),
-                ("ESET",      r"C:\Program Files\ESET"),
-            ]:
-                if os.path.isdir(path):
-                    return {"name": name, "path": path, "type": "thirdparty"}
         elif PLATFORM == "Linux":
             for cmd in ["clamscan", "clamdscan"]:
                 p = shutil.which(cmd)
@@ -69,10 +55,6 @@ class AVBridge:
                 return self._scan_defender(path)
             if t == "clamav":
                 return self._scan_clamav(path)
-            if t == "thirdparty":
-                return {"verdict": "unknown",
-                        "issues": ["Сторонний AV без CLI"],
-                        "source": "thirdparty"}
         if self._fallback:
             r = self._fallback.scan(path)
             r["source"] = "builtin"
@@ -81,18 +63,13 @@ class AVBridge:
 
     def _scan_defender(self, path):
         try:
-            cmd = [
-                self.host_av["path"],
-                "-Scan", "-ScanType", "3",
-                "-File", path,
-                "-DisableRemediation",
-            ]
+            cmd = [self.host_av["path"], "-Scan", "-ScanType", "3",
+                   "-File", path, "-DisableRemediation"]
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,
                 timeout=120, encoding="cp866", errors="replace",
             )
             out = (proc.stdout or "") + (proc.stderr or "")
-            self.log_fn(f"[DEFENDER] {os.path.basename(path)}: rc={proc.returncode}")
             if "no threats" in out.lower():
                 verdict, issues = "clean", []
             elif "threat" in out.lower() or "virus" in out.lower():
@@ -134,6 +111,6 @@ class AVBridge:
             return {"active": True, "name": self.host_av["name"],
                     "path": self.host_av["path"], "type": self.host_av["type"]}
         if self._fallback:
-            return {"active": True, "name": "SimpleOS Builtin AV",
+            return {"active": True, "name": "DreamUX Builtin AV",
                     "type": "builtin"}
         return {"active": False, "name": "none"}
