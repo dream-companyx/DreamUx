@@ -1,31 +1,49 @@
 #!/usr/bin/env python3
-"""SimpleConsoleOS — ядро DreamUX."""
+"""SimpleConsoleOS — ядро DreamUX v2.5.0."""
 
 import os
 import sys
-
-# --- sys.path ---
-_HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (
-    _HERE,
-    os.path.join(_HERE, "plugins"),
-    os.path.join(_HERE, "plugins", "gnome_gui"),
-):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
+import json
 import importlib
+import importlib.machinery
+import importlib.util
 import pkgutil
 
-import plugins
+
+# ============================================================
+# sys.path
+# ============================================================
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_PLUGINS = os.path.join(_HERE, "plugins")
+_APPS = os.path.join(_PLUGINS, "apps")
+
+for _p in (_HERE, _PLUGINS, _APPS):
+    if _p and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 
+# ============================================================
+# Загрузка .dll
+# ============================================================
+def load_dll(module_name, dll_path):
+    """Загружает .dll как Python-модуль через ExtensionFileLoader."""
+    loader = importlib.machinery.ExtensionFileLoader(module_name, dll_path)
+    spec = importlib.util.spec_from_loader(module_name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+# ============================================================
+# Ядро
+# ============================================================
 class Kernel:
     def __init__(self):
         self.commands = {}
         self.slash_commands = {}
         self.interfaces = {}
         self.named_interfaces = {}
+        self.apps = {}
         self._next_iface_id = 1
         self.loaded_plugins = []
         self.state = {}
@@ -52,47 +70,133 @@ class Kernel:
               f"(id={iface.id}, aliases={aliases})")
         return iface.id
 
-    # ---------- Плагины ----------
-    def load_plugin(self, module_name):
-        print(f"[DEBUG] load_plugin({module_name})")
+    def register_app(self, app):
+        self.apps[app.name] = app
+        print(f"[KERNEL] приложение '{app.name}' зарегистрировано")
+
+    # ---------- Загрузка плагинов ----------
+    def _try_load_dll(self, module_name, dll_path):
+        try:
+            module = load_dll(module_name, dll_path)
+            print(f"[DEBUG]   {module_name}: загружен из .dll")
+            return module
+        except Exception as e:
+            print(f"[DEBUG]   {module_name}: .dll ошибка: {e}")
+            return None
+
+    def _try_load_py(self, module_name):
         try:
             module = importlib.import_module(f"plugins.{module_name}")
-            print(f"[DEBUG]   файл: {getattr(module, '__file__', '?')}")
+            print(f"[DEBUG]   {module_name}: загружен из .py")
+            return module
         except Exception as e:
-            print(f"[!] Не удалось загрузить '{module_name}': {e}")
+            print(f"[DEBUG]   {module_name}: .py ошибка: {e}")
+            return None
+
+    def load_plugin(self, module_name):
+        print(f"[DEBUG] load_plugin({module_name})")
+
+        dll_path = os.path.join(_PLUGINS, module_name + ".dll")
+        py_path = os.path.join(_PLUGINS, module_name + ".py")
+
+        module = None
+
+        if os.path.isfile(dll_path):
+            module = self._try_load_dll(module_name, dll_path)
+
+        if module is None and os.path.isfile(py_path):
+            module = self._try_load_py(module_name)
+
+        if module is None:
+            print(f"[!] Плагин не найден: {module_name}")
             return
 
         if hasattr(module, "register"):
-            print(f"[DEBUG]   register() найден, вызываю...")
             try:
                 result = module.register(self)
-                print(f"[DEBUG]   register() вернул: {result}")
                 for cmd in (result or []):
                     self.register_command(cmd)
             except Exception as e:
                 import traceback
-                print(f"[DEBUG]   ⛔ register() упал:")
+                print(f"[DEBUG]   register() упал:")
                 traceback.print_exc()
-        else:
-            print(f"[DEBUG]   ⚠ register() отсутствует")
 
         self.loaded_plugins.append(module_name)
         print(f"[+] Плагин загружен: {module_name}")
 
     def load_all_plugins(self):
-        for _, name, _ in pkgutil.iter_modules(plugins.__path__):
-            if name in ("base", "__init__", "gnome_gui"):
+        if not os.path.isdir(_PLUGINS):
+            return
+        for _, name, _ in pkgutil.iter_modules([_PLUGINS]):
+            if name in ("base", "__init__", "apps"):
                 continue
             self.load_plugin(name)
+
+    # ---------- Загрузка приложений ----------
+    def _try_load_app_dll(self, name, dll_path):
+        try:
+            module = load_dll(f"app_{name}", dll_path)
+            print(f"[DEBUG]   app {name}: загружен из .dll")
+            return module
+        except Exception as e:
+            print(f"[DEBUG]   app {name}: .dll ошибка: {e}")
+            return None
+
+    def _try_load_app_py(self, name, py_path):
+        try:
+            spec = importlib.util.spec_from_file_location(f"app_{name}", py_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            print(f"[DEBUG]   app {name}: загружен из .py")
+            return module
+        except Exception as e:
+            print(f"[DEBUG]   app {name}: .py ошибка: {e}")
+            return None
+
+    def load_all_apps(self):
+        if not os.path.isdir(_APPS):
+            return
+
+        for entry in sorted(os.scandir(_APPS), key=lambda e: e.name):
+            if not entry.is_dir():
+                continue
+            name = entry.name
+
+            dll_path = os.path.join(entry.path, f"{name}.dll")
+            py_path = os.path.join(entry.path, f"{name}.py")
+
+            module = None
+
+            if os.path.isfile(dll_path):
+                module = self._try_load_app_dll(name, dll_path)
+
+            if module is None and os.path.isfile(py_path):
+                module = self._try_load_app_py(name, py_path)
+
+            if module is None:
+                print(f"[!] App {name}: нет ни .dll, ни .py")
+                continue
+
+            if hasattr(module, "register"):
+                try:
+                    module.register(self)
+                except Exception as e:
+                    import traceback
+                    print(f"[DEBUG]   app {name} register() упал:")
+                    traceback.print_exc()
+            else:
+                print(f"[!] App {name}: нет register()")
 
     # ---------- Баннер ----------
     def banner(self):
         print("=" * 46)
-        print("   SimpleConsoleOS v1.0")
+        print("   SimpleConsoleOS v2.5.0  —  DreamUX")
         print("   'help'                — список команд")
         print("   '/interface <номер>'  — интерфейс по номеру")
         print("   '/interfacegnom'      — запустить GNOME")
         print("   '/testgnome'          — диагностика GNOME")
+        print("   '/update'             — проверка обновлений")
+        print("   '/remote'             — RemoteTools")
         print("   '/help'               — все /команды")
         print("=" * 46)
 
@@ -178,7 +282,9 @@ class Kernel:
                 try:
                     entry["handler"](self, args)
                 except Exception as e:
+                    import traceback
                     print(f"[ошибка /{token}] {e}")
+                    traceback.print_exc()
                 continue
 
             parts = line.split()
@@ -206,6 +312,10 @@ class Kernel:
             print("\nИменованные интерфейсы:")
             for name, iface in sorted(self.named_interfaces.items()):
                 print(f"  /interface{name:<12} — {iface.description}")
+        if self.apps:
+            print("\nПриложения:")
+            for name, app in sorted(self.apps.items()):
+                print(f"  {app.icon} {name:<12} — {app.description}")
         print()
 
     def _list_interfaces(self):
@@ -227,6 +337,7 @@ class Kernel:
     def boot(self):
         self.banner()
         self.load_all_plugins()
+        self.load_all_apps()
         print()
         self.repl()
         print("Система остановлена.")
