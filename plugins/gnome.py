@@ -1,6 +1,6 @@
 """
 Плагин GNOME-интерфейса DreamUX.
-Скачивает gnome_gui.py и остальные файлы в plugins/gnome_gui/.
+Скачивает GUI из dreamux_gui и запускает его.
 """
 
 import os
@@ -11,7 +11,6 @@ import urllib.request
 from plugins.base import Interface
 
 
-# ---------- Пути ----------
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 GNOME_DIR = os.path.join(PLUGIN_DIR, "gnome_gui")
 ASSETS_DIR = os.path.join(GNOME_DIR, "assets")
@@ -21,24 +20,23 @@ LOGS_DIR = os.path.join(GNOME_DIR, "logs")
 SCREENSHOTS_DIR = os.path.join(GNOME_DIR, "screenshots")
 
 
-# ---------- Репозиторий ----------
 BASE_URL = "https://raw.githubusercontent.com/dream-companyx/dreamux_gui/main"
 
 FILES = {
     "gnome_gui.py":        f"{BASE_URL}/gnome_gui.py",
     "browser.py":          f"{BASE_URL}/browser.py",
-    "browser_engine.py":   f"{BASE_URL}/browser_engine.py",   # ← новая
+    "browser_engine.py":   f"{BASE_URL}/browser_engine.py",
     "games.py":            f"{BASE_URL}/games.py",
     "installers.py":       f"{BASE_URL}/installers.py",
     "splash.py":           f"{BASE_URL}/splash.py",
     "remote_tools_gui.py": f"{BASE_URL}/remote_tools_gui.py",
 }
+
 ASSETS = {
     "assets/dreamux.png": f"{BASE_URL}/assets/dreamux.png",
 }
 
 
-# ---------- Утилиты ----------
 def _ensure_dirs():
     os.makedirs(GNOME_DIR, exist_ok=True)
     os.makedirs(ASSETS_DIR, exist_ok=True)
@@ -58,15 +56,15 @@ def _download(url, dst, force=False):
             data = r.read()
         head = data[:300].lower()
         if b"<html" in head or b"404: not found" in head:
-            print(f"[GNOME] Ошибка {os.path.basename(dst)}: HTML/404")
+            print(f"[GNOME] ⛔ {os.path.basename(dst)}: HTML/404")
             return False
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         with open(dst, "wb") as f:
             f.write(data)
-        print(f"[GNOME] OK {os.path.basename(dst)} ({len(data)} байт)")
+        print(f"[GNOME] ✅ {os.path.basename(dst)} ({len(data)} байт)")
         return True
     except Exception as e:
-        print(f"[GNOME] Ошибка {os.path.basename(dst)}: {e}")
+        print(f"[GNOME] ⛔ {os.path.basename(dst)}: {e}")
         return False
 
 
@@ -104,12 +102,11 @@ def _copy_helpers_to_subdir():
                     data = f.read()
                 with open(dst, "wb") as f:
                     f.write(data)
-                print(f"[GNOME] Скопирован: {name}")
+                print(f"[GNOME] ↪ Скопирован: {name}")
             except Exception as e:
-                print(f"[GNOME] Ошибка копирования {name}: {e}")
+                print(f"[GNOME] ⚠ {name}: {e}")
 
 
-# ---------- Плагин ----------
 class GnomeDesktop(Interface):
     name = "gnom"
     description = "GNOME-интерфейс DreamUX (PyQt6, Adwaita dark)"
@@ -121,28 +118,28 @@ class GnomeDesktop(Interface):
         try:
             _ensure_dirs()
         except Exception as e:
-            print(f"[GNOME] _ensure_dirs: {e}")
+            print(f"[GNOME] ⚠ _ensure_dirs: {e}")
         try:
             _update_missing()
         except Exception as e:
-            print(f"[GNOME] _update_missing: {e}")
+            print(f"[GNOME] ⚠ _update_missing: {e}")
         try:
             _copy_helpers_to_subdir()
         except Exception as e:
-            print(f"[GNOME] _copy_helpers: {e}")
+            print(f"[GNOME] ⚠ _copy_helpers: {e}")
 
     def _launch_gui(self, kernel):
         try:
             import PyQt6  # noqa
         except ImportError:
-            print("[GNOME] PyQt6 не установлен. pip install PyQt6")
+            print("[GNOME] ⛔ PyQt6 не установлен. pip install PyQt6")
             return
 
         self._prepare()
 
         if not os.path.isfile(GUI_FILE):
             if not _download_all():
-                print("[GNOME] Не удалось скачать gnome_gui.py")
+                print("[GNOME] ⛔ Не удалось скачать gnome_gui.py")
                 return
 
         if self._gui_proc is not None and self._gui_proc.poll() is None:
@@ -178,10 +175,10 @@ class GnomeDesktop(Interface):
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
             )
-            print(f"[GNOME] GUI запущен (PID={self._gui_proc.pid})")
+            print(f"[GNOME] ✅ GUI запущен (PID={self._gui_proc.pid})")
             print("[GNOME] Ядро продолжает работу. Окно откроется отдельно.")
         except Exception as e:
-            print(f"[GNOME] Ошибка запуска: {e}")
+            print(f"[GNOME] ⛔ Ошибка запуска: {e}")
             self._gui_proc = None
 
     def render(self, kernel):
@@ -203,25 +200,25 @@ def register(kernel):
     print("[GNOME-DEBUG] register() стартовал")
     try:
         kernel.register_interface(GnomeDesktop(), aliases=["gnom", "gnome"])
-        print("[GNOME-DEBUG] интерфейс зарегистрирован")
+        print("[GNOME-DEBUG] ✅ интерфейс зарегистрирован")
     except Exception as e:
         import traceback
-        print(f"[GNOME-DEBUG] Ошибка регистрации: {e}")
+        print(f"[GNOME-DEBUG] ⛔ Ошибка регистрации: {e}")
         traceback.print_exc()
 
     try:
         _ensure_dirs()
     except Exception as e:
-        print(f"[GNOME] _ensure_dirs: {e}")
+        print(f"[GNOME] ⚠ _ensure_dirs: {e}")
 
     try:
         _update_missing()
     except Exception as e:
-        print(f"[GNOME] _update_missing: {e}")
+        print(f"[GNOME] ⚠ _update_missing: {e}")
 
     try:
         _copy_helpers_to_subdir()
     except Exception as e:
-        print(f"[GNOME] _copy_helpers: {e}")
+        print(f"[GNOME] ⚠ _copy_helpers: {e}")
 
     return []
