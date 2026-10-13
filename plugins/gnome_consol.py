@@ -1,9 +1,8 @@
 """
 DreamUX GNOME Consol — объединённая консоль.
-Запускает GNOME GUI отдельным процессом.
-Показывает логи GUI в консоли.
+Запускает GNOME GUI отдельным процессом. Показывает логи GUI в консоли.
 
-Запуск: /interfacegconsol
+Запуск: /gconsol [username]
 """
 
 import os
@@ -39,22 +38,29 @@ class GnomeConsol(Interface):
         self._monitor_thread = None
         self._running = False
         self._log_positions = {}
+        self.username = None
+        self._started_once = False
 
     def render(self, kernel):
         print("\n" + "=" * 60)
         print("  DreamUX GNOME Consol")
         print("=" * 60)
+        if self.username:
+            print(f"  Пользователь: {self.username}")
         print("  Всё в одной консоли:")
         print("    <команда>           — команда ядра")
+        print("    /<команда>          — slash-команда ядра (/dupfi, /disks)")
         print("    /gnome <команда>    — команда GNOME")
+        print("    user <имя>          — сменить пользователя")
         print("    logs                — показать логи")
         print("    clear_logs          — очистить логи")
-        print("    exit                — закрыть GNOME")
+        print("    exit                — закрыть")
         print("=" * 60)
         print()
 
     def handle_input(self, kernel, line):
-        if not self._running:
+        if not self._running and not self._started_once:
+            self._started_once = True
             self._launch_gnome(kernel)
             return False
 
@@ -72,6 +78,16 @@ class GnomeConsol(Interface):
 
         if line == "clear_logs":
             self._clear_logs()
+            return False
+
+        if line.lower().startswith("user "):
+            new_user = line.split(maxsplit=1)[1].strip()
+            self.username = new_user
+            print(f"[consol] Смена пользователя: {new_user}")
+            self._stop_gnome()
+            self._started_once = False
+            self._launch_gnome(kernel)
+            self._started_once = True
             return False
 
         if line.startswith("/"):
@@ -152,6 +168,10 @@ class GnomeConsol(Interface):
         env["SIMPLEOS_GNOME_DIR"] = GNOME_DIR
         env["SIMPLEOS_PLUGIN_DIR"] = PLUGIN_DIR
         env["SIMPLEOS_LOGS_DIR"] = LOGS_DIR
+
+        if self.username:
+            env["SIMPLEOS_USERNAME"] = self.username
+            print(f"[consol] Пользователь: {self.username}")
 
         try:
             log_f = open(stderr_path, "a", encoding="utf-8")
@@ -302,20 +322,27 @@ class GnomeConsol(Interface):
         print("  logs                — показать логи")
         print("  clear_logs          — очистить логи")
         print("  /gnome <команда>    — команда GNOME")
+        print("  user <имя>          — сменить пользователя")
         print("  exit                — выход")
         print()
 
 
 def slash_gconsol(kernel, args):
     iface = GnomeConsol()
+    if args:
+        iface.username = args[0]
+        print(f"[gconsol] Пользователь: {iface.username}")
     kernel.run_interface(iface)
 
 
 def register(kernel):
-    kernel.register_interface(GnomeConsol(),
-                              aliases=["gconsol", "gnome_consol"])
+    kernel.register_interface(
+        GnomeConsol(),
+        aliases=["gconsol", "gnome_consol"],
+    )
     kernel.register_slash_command(
-        "gconsol", slash_gconsol,
-        "GNOME Consol — консоль + GUI + логи",
+        "gconsol",
+        slash_gconsol,
+        "GNOME Consol — /gconsol [username]",
     )
     return []
