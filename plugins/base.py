@@ -9,7 +9,7 @@ class Command:
     description: str = ""
     usage: str = ""
 
-    def run(self, kernel, args: list[str]) -> None:
+    def run(self, kernel, args: list) -> None:
         raise NotImplementedError
 
 
@@ -26,11 +26,6 @@ class Interface:
 
 
 class App:
-    """
-    Плагин-приложение.
-    Оболочка (.py/.dll) регистрирует приложение в ядре.
-    .exe (опционально) — само приложение.
-    """
     name: str = ""
     icon: str = "📦"
     description: str = ""
@@ -52,12 +47,14 @@ class App:
         exe = self.get_exe_path()
         if not os.path.isfile(exe):
             print(f"[APP] {self.name}: не найден {exe}")
-            return
+            return None
         try:
             proc = subprocess.Popen([exe], cwd=self.get_dir())
             print(f"[APP] {self.name} запущен (PID={proc.pid})")
+            return proc
         except Exception as e:
             print(f"[APP] {self.name}: {e}")
+            return None
 
     def _open_inproc(self, desktop, kernel):
         raise NotImplementedError(
