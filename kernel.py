@@ -10,9 +10,6 @@ import importlib.util
 import pkgutil
 
 
-# ============================================================
-# sys.path
-# ============================================================
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PLUGINS = os.path.join(_HERE, "plugins")
 _APPS = os.path.join(_PLUGINS, "apps")
@@ -22,11 +19,7 @@ for _p in (_HERE, _PLUGINS, _APPS):
         sys.path.insert(0, _p)
 
 
-# ============================================================
-# Загрузка .dll
-# ============================================================
 def load_dll(module_name, dll_path):
-    """Загружает .dll как Python-модуль через ExtensionFileLoader."""
     loader = importlib.machinery.ExtensionFileLoader(module_name, dll_path)
     spec = importlib.util.spec_from_loader(module_name, loader)
     module = importlib.util.module_from_spec(spec)
@@ -34,9 +27,6 @@ def load_dll(module_name, dll_path):
     return module
 
 
-# ============================================================
-# Ядро
-# ============================================================
 class Kernel:
     def __init__(self):
         self.commands = {}
@@ -48,8 +38,8 @@ class Kernel:
         self.loaded_plugins = []
         self.state = {}
         self.running = True
+        self.vfs_initialized = False
 
-    # ---------- Регистрация ----------
     def register_command(self, cmd):
         self.commands[cmd.name] = cmd
 
@@ -74,7 +64,18 @@ class Kernel:
         self.apps[app.name] = app
         print(f"[KERNEL] приложение '{app.name}' зарегистрировано")
 
-    # ---------- Загрузка плагинов ----------
+    def init_vfs(self):
+        try:
+            from plugins import vfs
+            if not vfs.is_initialized():
+                print("\n[KERNEL] Первый запуск — создаю виртуальные диски...")
+                vfs.initialize_vfs(log=print)
+                self.vfs_initialized = True
+            else:
+                print("[KERNEL] VFS уже инициализировано.")
+        except ImportError:
+            print("[KERNEL] Модуль vfs.py не найден")
+
     def _try_load_dll(self, module_name, dll_path):
         try:
             module = load_dll(module_name, dll_path)
@@ -116,7 +117,7 @@ class Kernel:
                 result = module.register(self)
                 for cmd in (result or []):
                     self.register_command(cmd)
-            except Exception as e:
+            except Exception:
                 import traceback
                 print(f"[DEBUG]   register() упал:")
                 traceback.print_exc()
@@ -132,14 +133,13 @@ class Kernel:
                 continue
             self.load_plugin(name)
 
-    # ---------- Загрузка приложений ----------
     def _try_load_app_dll(self, name, dll_path):
         try:
             module = load_dll(f"app_{name}", dll_path)
-            print(f"[DEBUG]   app {name}: загружен из .dll")
+            print(f"[DEBUG]   app {name}: .dll")
             return module
         except Exception as e:
-            print(f"[DEBUG]   app {name}: .dll ошибка: {e}")
+            print(f"[DEBUG]   app {name}: .dll: {e}")
             return None
 
     def _try_load_app_py(self, name, py_path):
@@ -147,10 +147,10 @@ class Kernel:
             spec = importlib.util.spec_from_file_location(f"app_{name}", py_path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            print(f"[DEBUG]   app {name}: загружен из .py")
+            print(f"[DEBUG]   app {name}: .py")
             return module
         except Exception as e:
-            print(f"[DEBUG]   app {name}: .py ошибка: {e}")
+            print(f"[DEBUG]   app {name}: .py: {e}")
             return None
 
     def load_all_apps(self):
@@ -180,14 +180,11 @@ class Kernel:
             if hasattr(module, "register"):
                 try:
                     module.register(self)
-                except Exception as e:
+                except Exception:
                     import traceback
                     print(f"[DEBUG]   app {name} register() упал:")
                     traceback.print_exc()
-            else:
-                print(f"[!] App {name}: нет register()")
 
-    # ---------- Баннер ----------
     def banner(self):
         print("=" * 46)
         print("   SimpleConsoleOS v2.5.0  —  DreamUX")
@@ -197,10 +194,11 @@ class Kernel:
         print("   '/testgnome'          — диагностика GNOME")
         print("   '/update'             — проверка обновлений")
         print("   '/remote'             — RemoteTools")
+        print("   '/disks'              — виртуальные диски")
+        print("   '/dupfi'              — установщик пакетов")
         print("   '/help'               — все /команды")
         print("=" * 46)
 
-    # ---------- Интерфейсы ----------
     def run_interface(self, iface):
         iface.render(self)
         while self.running:
@@ -219,7 +217,6 @@ class Kernel:
             except Exception as e:
                 print(f"[ошибка интерфейса] {e}")
 
-    # ---------- REPL ----------
     def repl(self):
         while self.running:
             try:
@@ -336,6 +333,7 @@ class Kernel:
 
     def boot(self):
         self.banner()
+        self.init_vfs()
         self.load_all_plugins()
         self.load_all_apps()
         print()
@@ -345,6 +343,31 @@ class Kernel:
 
 if __name__ == "__main__":
     try:
+        args = sys.argv[1:]
+
+        if len(args) >= 2 and args[0] == "--install-dupfi":
+            path = args[1]
+            kernel = Kernel()
+            kernel.init_vfs()
+            kernel.load_all_plugins()
+            if "dupfi" in kernel.slash_commands:
+                kernel.slash_commands["dupfi"]["handler"](
+                    kernel, ["install", path]
+                )
+            sys.exit(0)
+
+        if len(args) >= 2 and args[0] == "--open-duap":
+            path = args[1]
+            kernel = Kernel()
+            kernel.init_vfs()
+            kernel.load_all_plugins()
+            if "duap" in kernel.slash_commands:
+                kernel.slash_commands["duap"]["handler"](
+                    kernel, ["info", path]
+                )
+            sys.exit(0)
+
         Kernel().boot()
+
     except KeyboardInterrupt:
         sys.exit(0)
