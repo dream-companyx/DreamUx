@@ -3,8 +3,8 @@
 Запускает GUI отдельным процессом.
 
 Slash-команды:
-    /gnome              — GNOME (автовход как 'user')
-    /gnome <username>   — GNOME под указанным пользователем
+    /gnome              — splash + lock screen + рабочий стол
+    /gnome <username>   — автовход (без splash и lock screen)
 """
 
 import os
@@ -165,6 +165,7 @@ class GnomeDesktop(Interface):
         if username:
             env["SIMPLEOS_USERNAME"] = username
             print(f"[GNOME] Пользователь: {username}")
+            print("[GNOME] Splash и lock screen будут пропущены")
 
         log_path = os.path.join(LOGS_DIR, "gnome_stderr.log")
         print(f"[GNOME] Python: {sys.executable}")
@@ -204,6 +205,7 @@ class GnomeDesktop(Interface):
         if self.username:
             print(f"  Пользователь: {self.username}")
         print("  exit — выход, gnome — перезапуск GUI")
+        print("  /dupfi install ... — установка пакета")
         print("=" * 60 + "\n")
         self._launch_gui(kernel, username=self.username)
 
