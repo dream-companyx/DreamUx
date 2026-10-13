@@ -37,7 +37,7 @@ def check_paths():
 
 def check_files():
     print("\n[Файлы в plugins/gnome_gui/]")
-    for name in ["gnome_gui.py", "browser.py", "browser_engine.py",
+    for name in ["gnome_gui.py", "lock_screen.py", "browser_engine.py",
                  "games.py", "installers.py", "splash.py",
                  "remote_tools_gui.py"]:
         p = os.path.join(GNOME_DIR, name)
