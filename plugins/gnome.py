@@ -24,7 +24,7 @@ BASE_URL = "https://raw.githubusercontent.com/dream-companyx/dreamux_gui/main"
 
 FILES = {
     "gnome_gui.py":        f"{BASE_URL}/gnome_gui.py",
-    "browser.py":          f"{BASE_URL}/browser.py",
+    "lock_screen.py":      f"{BASE_URL}/lock_screen.py",
     "browser_engine.py":   f"{BASE_URL}/browser_engine.py",
     "games.py":            f"{BASE_URL}/games.py",
     "installers.py":       f"{BASE_URL}/installers.py",
@@ -152,8 +152,6 @@ class GnomeDesktop(Interface):
         )
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
-        env["SIMPLEOS_NETD"] = "1"
-        env["SIMPLEOS_AV_HOST"] = "1"
         env["SIMPLEOS_GNOME_DIR"] = GNOME_DIR
         env["SIMPLEOS_PLUGIN_DIR"] = PLUGIN_DIR
         env["SIMPLEOS_LOGS_DIR"] = LOGS_DIR
@@ -164,7 +162,6 @@ class GnomeDesktop(Interface):
         print(f"[GNOME] Python: {sys.executable}")
         print(f"[GNOME] Запуск: {GUI_FILE}")
         print(f"[GNOME] CWD:    {GNOME_DIR}")
-        print(f"[GNOME] Лог:    {log_path}")
 
         try:
             log_f = open(log_path, "w", encoding="utf-8")
@@ -176,7 +173,6 @@ class GnomeDesktop(Interface):
                 stderr=subprocess.STDOUT,
             )
             print(f"[GNOME] ✅ GUI запущен (PID={self._gui_proc.pid})")
-            print("[GNOME] Ядро продолжает работу. Окно откроется отдельно.")
         except Exception as e:
             print(f"[GNOME] ⛔ Ошибка запуска: {e}")
             self._gui_proc = None
