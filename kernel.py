@@ -190,7 +190,8 @@ class Kernel:
         print("   SimpleConsoleOS v2.5.0  —  DreamUX")
         print("   'help'                — список команд")
         print("   '/interface <номер>'  — интерфейс по номеру")
-        print("   '/interfacegnom'      — запустить GNOME")
+        print("   '/gnome [username]'   — запустить GNOME")
+        print("   '/gui'                — управление GUI")
         print("   '/testgnome'          — диагностика GNOME")
         print("   '/update'             — проверка обновлений")
         print("   '/remote'             — RemoteTools")
@@ -337,7 +338,40 @@ class Kernel:
         self.load_all_plugins()
         self.load_all_apps()
         print()
+
+        # === АВТОЗАПУСК GUI (после полной инициализации ядра) ===
+        try:
+            from plugins import gui_server
+            server = gui_server.get_server(self)
+            if server:
+                server.start_server()
+                server.start_gui()
+                print("[KERNEL] ✅ GUI запущен через плагин")
+        except ImportError:
+            print("[KERNEL] Плагин gui_server не найден — GUI не запущен")
+        except Exception as e:
+            import traceback
+            print(f"[KERNEL] ⚠ GUI autostart: {e}")
+            traceback.print_exc()
+        # ========================================================
+
         self.repl()
+
+        # При выходе — гасим GUI и VHD
+        try:
+            from plugins import gui_server
+            server = gui_server.get_server()
+            if server:
+                server.shutdown()
+        except Exception:
+            pass
+
+        try:
+            from plugins import vfs
+            vfs.shutdown(log=print)
+        except Exception:
+            pass
+
         print("Система остановлена.")
 
 
