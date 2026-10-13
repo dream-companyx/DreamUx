@@ -1,6 +1,10 @@
 """
 Плагин GNOME-интерфейса DreamUX.
-Скачивает GUI из dreamux_gui и запускает его.
+Запускает GUI отдельным процессом.
+
+Slash-команды:
+    /gnome              — GNOME (автовход как 'user')
+    /gnome <username>   — GNOME под указанным пользователем
 """
 
 import os
@@ -14,7 +18,6 @@ from plugins.base import Interface
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 GNOME_DIR = os.path.join(PLUGIN_DIR, "gnome_gui")
 ASSETS_DIR = os.path.join(GNOME_DIR, "assets")
-INIT_FILE = os.path.join(GNOME_DIR, "__init__.py")
 GUI_FILE = os.path.join(GNOME_DIR, "gnome_gui.py")
 LOGS_DIR = os.path.join(GNOME_DIR, "logs")
 SCREENSHOTS_DIR = os.path.join(GNOME_DIR, "screenshots")
@@ -113,6 +116,7 @@ class GnomeDesktop(Interface):
 
     def __init__(self):
         self._gui_proc = None
+        self.username = None
 
     def _prepare(self):
         try:
@@ -128,7 +132,7 @@ class GnomeDesktop(Interface):
         except Exception as e:
             print(f"[GNOME] ⚠ _copy_helpers: {e}")
 
-    def _launch_gui(self, kernel):
+    def _launch_gui(self, kernel, username=None):
         try:
             import PyQt6  # noqa
         except ImportError:
@@ -158,10 +162,13 @@ class GnomeDesktop(Interface):
         env["SIMPLEOS_SCREENSHOTS_DIR"] = SCREENSHOTS_DIR
         env["SIMPLEOS_ASSETS_DIR"] = ASSETS_DIR
 
+        if username:
+            env["SIMPLEOS_USERNAME"] = username
+            print(f"[GNOME] Пользователь: {username}")
+
         log_path = os.path.join(LOGS_DIR, "gnome_stderr.log")
         print(f"[GNOME] Python: {sys.executable}")
         print(f"[GNOME] Запуск: {GUI_FILE}")
-        print(f"[GNOME] CWD:    {GNOME_DIR}")
 
         try:
             log_f = open(log_path, "w", encoding="utf-8")
@@ -177,26 +184,98 @@ class GnomeDesktop(Interface):
             print(f"[GNOME] ⛔ Ошибка запуска: {e}")
             self._gui_proc = None
 
+    def _stop_gui(self):
+        if self._gui_proc is not None and self._gui_proc.poll() is None:
+            try:
+                self._gui_proc.terminate()
+                self._gui_proc.wait(timeout=5)
+            except Exception:
+                try:
+                    self._gui_proc.kill()
+                except Exception:
+                    pass
+            print("[GNOME] GUI остановлен")
+        self._gui_proc = None
+
     def render(self, kernel):
-        print("\n[GNOME] Подготовка...")
-        self._launch_gui(kernel)
+        print("\n" + "=" * 60)
+        print("  DreamUX GNOME")
+        print("=" * 60)
+        if self.username:
+            print(f"  Пользователь: {self.username}")
+        print("  exit — выход, gnome — перезапуск GUI")
+        print("=" * 60 + "\n")
+        self._launch_gui(kernel, username=self.username)
 
     def handle_input(self, kernel, line):
-        if line.strip().lower() in ("exit", "/exit", "quit", "/quit"):
+        line = line.strip()
+        if not line:
+            return False
+
+        if line.lower() in ("exit", "/exit", "quit", "/quit"):
+            self._stop_gui()
             return True
-        if self._gui_proc is None or self._gui_proc.poll() is not None:
-            print("[GNOME] GUI не запущен, перезапускаю...")
-            self._launch_gui(kernel)
-        else:
-            print(f"[GNOME] GUI уже запущен (PID={self._gui_proc.pid})")
+
+        if line.lower() in ("gnome", "gui", "restart"):
+            self._stop_gui()
+            self._launch_gui(kernel, username=self.username)
+            return False
+
+        if line.lower() in ("help", "/help", "?"):
+            self.render(kernel)
+            return False
+
+        if line.startswith("/"):
+            parts = line[1:].split()
+            if not parts:
+                return False
+            token = parts[0].lower()
+            args = parts[1:]
+            entry = kernel.slash_commands.get(token)
+            if entry is None:
+                print(f"[GNOME] Неизвестная /команда: /{token}")
+                return False
+            try:
+                entry["handler"](kernel, args)
+            except Exception as e:
+                import traceback
+                print(f"[GNOME] [ошибка /{token}] {e}")
+                traceback.print_exc()
+            return False
+
+        parts = line.split()
+        name, args = parts[0], parts[1:]
+        cmd = kernel.commands.get(name)
+        if cmd is None:
+            print(f"[GNOME] Неизвестная команда: {name}")
+            return False
+        try:
+            cmd.run(kernel, args)
+        except Exception as e:
+            print(f"[GNOME] [ошибка команды] {e}")
         return False
+
+
+def slash_gnome(kernel, args):
+    iface = GnomeDesktop()
+    if args:
+        iface.username = args[0]
+        print(f"[GNOME] Запуск под пользователем: {iface.username}")
+    kernel.run_interface(iface)
 
 
 def register(kernel):
     print("[GNOME-DEBUG] register() стартовал")
     try:
-        kernel.register_interface(GnomeDesktop(), aliases=["gnom", "gnome"])
-        print("[GNOME-DEBUG] ✅ интерфейс зарегистрирован")
+        kernel.register_interface(
+            GnomeDesktop(), aliases=["gnom", "gnome"]
+        )
+        kernel.register_slash_command(
+            "gnome",
+            slash_gnome,
+            "GNOME — /gnome [username]",
+        )
+        print("[GNOME-DEBUG] ✅ интерфейс + /gnome зарегистрированы")
     except Exception as e:
         import traceback
         print(f"[GNOME-DEBUG] ⛔ Ошибка регистрации: {e}")
@@ -204,17 +283,15 @@ def register(kernel):
 
     try:
         _ensure_dirs()
-    except Exception as e:
-        print(f"[GNOME] ⚠ _ensure_dirs: {e}")
-
+    except Exception:
+        pass
     try:
         _update_missing()
-    except Exception as e:
-        print(f"[GNOME] ⚠ _update_missing: {e}")
-
+    except Exception:
+        pass
     try:
         _copy_helpers_to_subdir()
-    except Exception as e:
-        print(f"[GNOME] ⚠ _copy_helpers: {e}")
+    except Exception:
+        pass
 
     return []
