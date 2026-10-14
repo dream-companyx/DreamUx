@@ -1,113 +1,18 @@
-"""
-Плагин GNOME-интерфейса DreamUX.
-Запускает GUI отдельным процессом.
-
-Slash-команды:
-    /gnome              — splash + lock screen + рабочий стол
-    /gnome <username>   — автовход (без splash и lock screen)
-"""
+"""Плагин GNOME. Запускает GUI отдельным процессом."""
 
 import os
 import sys
 import subprocess
-import urllib.request
 
 from plugins.base import Interface
 
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 GNOME_DIR = os.path.join(PLUGIN_DIR, "gnome_gui")
-ASSETS_DIR = os.path.join(GNOME_DIR, "assets")
 GUI_FILE = os.path.join(GNOME_DIR, "gnome_gui.py")
 LOGS_DIR = os.path.join(GNOME_DIR, "logs")
 SCREENSHOTS_DIR = os.path.join(GNOME_DIR, "screenshots")
-
-
-BASE_URL = "https://raw.githubusercontent.com/dream-companyx/dreamux_gui/main"
-
-FILES = {
-    "gnome_gui.py":        f"{BASE_URL}/gnome_gui.py",
-    "lock_screen.py":      f"{BASE_URL}/lock_screen.py",
-    "browser_engine.py":   f"{BASE_URL}/browser_engine.py",
-    "games.py":            f"{BASE_URL}/games.py",
-    "installers.py":       f"{BASE_URL}/installers.py",
-    "splash.py":           f"{BASE_URL}/splash.py",
-    "remote_tools_gui.py": f"{BASE_URL}/remote_tools_gui.py",
-}
-
-ASSETS = {
-    "assets/dreamux.png": f"{BASE_URL}/assets/dreamux.png",
-}
-
-
-def _ensure_dirs():
-    os.makedirs(GNOME_DIR, exist_ok=True)
-    os.makedirs(ASSETS_DIR, exist_ok=True)
-    os.makedirs(LOGS_DIR, exist_ok=True)
-    os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
-
-
-def _download(url, dst, force=False):
-    if os.path.isfile(dst) and not force:
-        return True
-    try:
-        print(f"[GNOME] Скачиваю: {os.path.relpath(dst, GNOME_DIR)}")
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "DreamUX-GNOME/1.0"}
-        )
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = r.read()
-        head = data[:300].lower()
-        if b"<html" in head or b"404: not found" in head:
-            print(f"[GNOME] ⛔ {os.path.basename(dst)}: HTML/404")
-            return False
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        with open(dst, "wb") as f:
-            f.write(data)
-        print(f"[GNOME] ✅ {os.path.basename(dst)} ({len(data)} байт)")
-        return True
-    except Exception as e:
-        print(f"[GNOME] ⛔ {os.path.basename(dst)}: {e}")
-        return False
-
-
-def _download_all(force=False):
-    ok = True
-    for name, url in FILES.items():
-        dst = os.path.join(GNOME_DIR, name)
-        if not _download(url, dst, force=force):
-            ok = False
-    for rel, url in ASSETS.items():
-        dst = os.path.join(GNOME_DIR, rel)
-        if not _download(url, dst, force=force):
-            ok = False
-    return ok
-
-
-def _update_missing():
-    for name, url in FILES.items():
-        dst = os.path.join(GNOME_DIR, name)
-        if not os.path.isfile(dst):
-            _download(url, dst)
-    for rel, url in ASSETS.items():
-        dst = os.path.join(GNOME_DIR, rel)
-        if not os.path.isfile(dst):
-            _download(url, dst)
-
-
-def _copy_helpers_to_subdir():
-    for name in ("netd.py", "ovpn.py", "av_bridge.py", "antivirus.py"):
-        src = os.path.join(PLUGIN_DIR, name)
-        dst = os.path.join(GNOME_DIR, name)
-        if os.path.isfile(src) and not os.path.isfile(dst):
-            try:
-                with open(src, "rb") as f:
-                    data = f.read()
-                with open(dst, "wb") as f:
-                    f.write(data)
-                print(f"[GNOME] ↪ Скопирован: {name}")
-            except Exception as e:
-                print(f"[GNOME] ⚠ {name}: {e}")
+ASSETS_DIR = os.path.join(GNOME_DIR, "assets")
 
 
 class GnomeDesktop(Interface):
@@ -118,20 +23,6 @@ class GnomeDesktop(Interface):
         self._gui_proc = None
         self.username = None
 
-    def _prepare(self):
-        try:
-            _ensure_dirs()
-        except Exception as e:
-            print(f"[GNOME] ⚠ _ensure_dirs: {e}")
-        try:
-            _update_missing()
-        except Exception as e:
-            print(f"[GNOME] ⚠ _update_missing: {e}")
-        try:
-            _copy_helpers_to_subdir()
-        except Exception as e:
-            print(f"[GNOME] ⚠ _copy_helpers: {e}")
-
     def _launch_gui(self, kernel, username=None):
         try:
             import PyQt6  # noqa
@@ -139,12 +30,15 @@ class GnomeDesktop(Interface):
             print("[GNOME] ⛔ PyQt6 не установлен. pip install PyQt6")
             return
 
-        self._prepare()
-
         if not os.path.isfile(GUI_FILE):
-            if not _download_all():
-                print("[GNOME] ⛔ Не удалось скачать gnome_gui.py")
-                return
+            print(f"[GNOME] ⛔ Не найден: {GUI_FILE}")
+            return
+
+        for d in (LOGS_DIR, SCREENSHOTS_DIR, ASSETS_DIR):
+            try:
+                os.makedirs(d, exist_ok=True)
+            except Exception:
+                pass
 
         if self._gui_proc is not None and self._gui_proc.poll() is None:
             print(f"[GNOME] GUI уже запущен (PID={self._gui_proc.pid})")
@@ -152,7 +46,8 @@ class GnomeDesktop(Interface):
 
         env = os.environ.copy()
         env["PYTHONPATH"] = os.pathsep.join(
-            [GNOME_DIR, PLUGIN_DIR, env.get("PYTHONPATH", "")]
+            [GNOME_DIR, PLUGIN_DIR, os.path.dirname(PLUGIN_DIR),
+             env.get("PYTHONPATH", "")]
         )
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
@@ -165,7 +60,6 @@ class GnomeDesktop(Interface):
         if username:
             env["SIMPLEOS_USERNAME"] = username
             print(f"[GNOME] Пользователь: {username}")
-            print("[GNOME] Splash и lock screen будут пропущены")
 
         log_path = os.path.join(LOGS_DIR, "gnome_stderr.log")
         print(f"[GNOME] Python: {sys.executable}")
@@ -205,7 +99,6 @@ class GnomeDesktop(Interface):
         if self.username:
             print(f"  Пользователь: {self.username}")
         print("  exit — выход, gnome — перезапуск GUI")
-        print("  /dupfi install ... — установка пакета")
         print("=" * 60 + "\n")
         self._launch_gui(kernel, username=self.username)
 
@@ -213,20 +106,16 @@ class GnomeDesktop(Interface):
         line = line.strip()
         if not line:
             return False
-
         if line.lower() in ("exit", "/exit", "quit", "/quit"):
             self._stop_gui()
             return True
-
         if line.lower() in ("gnome", "gui", "restart"):
             self._stop_gui()
             self._launch_gui(kernel, username=self.username)
             return False
-
         if line.lower() in ("help", "/help", "?"):
             self.render(kernel)
             return False
-
         if line.startswith("/"):
             parts = line[1:].split()
             if not parts:
@@ -244,7 +133,6 @@ class GnomeDesktop(Interface):
                 print(f"[GNOME] [ошибка /{token}] {e}")
                 traceback.print_exc()
             return False
-
         parts = line.split()
         name, args = parts[0], parts[1:]
         cmd = kernel.commands.get(name)
@@ -269,31 +157,12 @@ def slash_gnome(kernel, args):
 def register(kernel):
     print("[GNOME-DEBUG] register() стартовал")
     try:
-        kernel.register_interface(
-            GnomeDesktop(), aliases=["gnom", "gnome"]
-        )
+        kernel.register_interface(GnomeDesktop(), aliases=["gnom", "gnome"])
         kernel.register_slash_command(
-            "gnome",
-            slash_gnome,
-            "GNOME — /gnome [username]",
-        )
-        print("[GNOME-DEBUG] ✅ интерфейс + /gnome зарегистрированы")
+            "gnome", slash_gnome, "GNOME — /gnome [username]")
+        print("[GNOME-DEBUG] ✅ зарегистрировано")
     except Exception as e:
         import traceback
-        print(f"[GNOME-DEBUG] ⛔ Ошибка регистрации: {e}")
+        print(f"[GNOME-DEBUG] ⛔ {e}")
         traceback.print_exc()
-
-    try:
-        _ensure_dirs()
-    except Exception:
-        pass
-    try:
-        _update_missing()
-    except Exception:
-        pass
-    try:
-        _copy_helpers_to_subdir()
-    except Exception:
-        pass
-
     return []
