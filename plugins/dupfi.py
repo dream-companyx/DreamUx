@@ -1,6 +1,7 @@
 """
 DreamUX Paket Installer — установщик пакетов и архивов.
 Работает с .dupfi (манифест) и .duap/.zip (архивы).
+Устанавливает в DRXFS disk2:/apps/<name>/.
 
 Slash-команды:
     /dupfi install <файл|url>   — установить пакет
@@ -15,16 +16,17 @@ Slash-команды:
 """
 
 import os
+import io
+import json
 import shutil
 import zipfile
 import urllib.request
 import urllib.error
 import datetime
-import json
+import tempfile
 
 from plugins.base import Interface
 
-# Контроль доступа
 try:
     from plugins import access
     HAS_ACCESS = True
@@ -32,7 +34,6 @@ except ImportError:
     access = None
     HAS_ACCESS = False
 
-# Модуль .duap
 try:
     from plugins import duap as _duap
     HAS_DUAP = True
@@ -40,31 +41,23 @@ except ImportError:
     _duap = None
     HAS_DUAP = False
 
+try:
+    from plugins import vfs as _vfs
+    HAS_VFS = True
+except ImportError:
+    _vfs = None
+    HAS_VFS = False
 
-# ============================================================
-# Пути
-# ============================================================
+
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 KERNEL_DIR = os.path.dirname(PLUGIN_DIR)
 
-VFS_ROOT = os.path.join(KERNEL_DIR, "vfs")
-DISK_0_SYSTEM = os.path.join(VFS_ROOT, "disk0", "system")
-DISK_1 = os.path.join(VFS_ROOT, "disk1.vhd.data")
-
-if os.path.isdir(DISK_1):
-    APPS_DIR = os.path.join(DISK_1, "apps")
-    PACKAGES_DIR = os.path.join(DISK_1, "packages")
-    DOWNLOADS_DIR = os.path.join(DISK_1, "downloads")
-else:
-    APPS_DIR = os.path.join(PLUGIN_DIR, "apps")
-    PACKAGES_DIR = os.path.join(KERNEL_DIR, "packages")
-    DOWNLOADS_DIR = os.path.join(KERNEL_DIR, "downloads")
-
-INSTALLED_FILE = os.path.join(KERNEL_DIR, "installed_packages.json")
+PACKAGES_DIR = os.path.join(KERNEL_DIR, "packages")
+DOWNLOADS_DIR = os.path.join(KERNEL_DIR, "downloads")
 
 
 def _ensure_dirs():
-    for d in (APPS_DIR, PACKAGES_DIR, DOWNLOADS_DIR):
+    for d in (PACKAGES_DIR, DOWNLOADS_DIR):
         try:
             os.makedirs(d, exist_ok=True)
         except Exception:
@@ -74,9 +67,6 @@ def _ensure_dirs():
 _ensure_dirs()
 
 
-# ============================================================
-# Права доступа
-# ============================================================
 def _check(perm, log=print):
     if not HAS_ACCESS:
         return True
@@ -88,9 +78,6 @@ def _check(perm, log=print):
     return False
 
 
-# ============================================================
-# Утилиты
-# ============================================================
 def _ts():
     return datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -108,8 +95,7 @@ def _download(url, dst, log=print):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         log(f"[DUPFI] Скачиваю: {url}")
         req = urllib.request.Request(
-            url, headers={"User-Agent": "DreamUX-DUPFI/1.0"}
-        )
+            url, headers={"User-Agent": "DreamUX-DUPFI/1.0"})
         with urllib.request.urlopen(req, timeout=60) as r:
             data = r.read()
         with open(dst, "wb") as f:
@@ -124,9 +110,6 @@ def _download(url, dst, log=print):
         return False
 
 
-# ============================================================
-# Архивы
-# ============================================================
 def _detect_archive(path):
     if HAS_DUAP:
         return _duap.detect_format(path)
@@ -149,7 +132,6 @@ def _open_archive(path):
             if not ok:
                 raise ValueError(f"DUAP повреждён: {msg}")
             return _duap.open_duap(path)
-        import io
         with open(path, "rb") as f:
             f.seek(64)
             return zipfile.ZipFile(io.BytesIO(f.read()), "r")
@@ -158,25 +140,7 @@ def _open_archive(path):
     raise ValueError("Не .zip и не .duap")
 
 
-# ============================================================
-# Парсер .dupfi
-# ============================================================
 def _parse_dupfi(path):
-    """
-    Формат .dupfi:
-
-        name = Paint
-        version = 1.0.0
-        author = Dream Company
-        level = 2
-
-        [Git]
-        url = https://...
-
-        [FileGit]
-        paint.py
-        assets/icon.png
-    """
     if not os.path.isfile(path):
         return None, "файл не найден"
 
@@ -236,9 +200,9 @@ def _parse_dupfi(path):
     return data, None
 
 
-# ============================================================
-# Реестр установленных
-# ============================================================
+INSTALLED_FILE = os.path.join(KERNEL_DIR, "installed_packages.json")
+
+
 def _load_installed():
     if os.path.isfile(INSTALLED_FILE):
         try:
@@ -257,11 +221,12 @@ def _save_installed(data):
         print(f"[DUPFI] Ошибка реестра: {e}")
 
 
-# ============================================================
-# Установка
-# ============================================================
 def _install(dupfi_path, log=print):
     if not _check("install_dupi", log):
+        return False
+
+    if not HAS_VFS:
+        log("[DUPFI] ⛔ VFS недоступен — установка невозможна")
         return False
 
     data, err = _parse_dupfi(dupfi_path)
@@ -279,8 +244,7 @@ def _install(dupfi_path, log=print):
     if HAS_ACCESS:
         s = access.get_session()
         if s.level > pkg_level:
-            log(f"[DUPFI] ⛔ Недостаточно прав: пакет требует "
-                f"уровень {pkg_level}")
+            log(f"[DUPFI] ⛔ Недостаточно прав: пакет требует уровень {pkg_level}")
             return False
 
     log(f"\n[DUPFI] Установка: {name} v{version}")
@@ -291,12 +255,11 @@ def _install(dupfi_path, log=print):
     for f in files:
         log(f"[DUPFI]   • {f}")
 
-    ext = ".duap" if git_url.endswith(".duap") else ".zip"
-    archive_name = os.path.basename(git_url.split("?")[0]) or f"archive{ext}"
+    tmp_dir = tempfile.mkdtemp(prefix="dupfi_")
+    archive_name = os.path.basename(git_url.split("?")[0]) or "archive.zip"
     if not archive_name.endswith((".zip", ".duap")):
-        archive_name += ext
-    archive_path = os.path.join(DOWNLOADS_DIR,
-                                f"{name}_{_ts()}_{archive_name}")
+        archive_name += ".zip"
+    archive_path = os.path.join(tmp_dir, archive_name)
 
     if not _download(git_url, archive_path, log=log):
         return False
@@ -314,8 +277,11 @@ def _install(dupfi_path, log=print):
             return False
         log(f"[DUPFI] ✅ SHA256 OK")
 
-    target = os.path.join(APPS_DIR, name)
-    os.makedirs(target, exist_ok=True)
+    # Создаём папку в DRXFS
+    try:
+        _vfs.mkdir("disk2", f"apps/{name}")
+    except Exception as e:
+        log(f"[DUPFI] ⚠ mkdir apps/{name}: {e}")
 
     extracted = 0
     try:
@@ -331,31 +297,33 @@ def _install(dupfi_path, log=print):
                     continue
                 for match in matches:
                     try:
-                        dst = os.path.join(target, wanted)
-                        os.makedirs(os.path.dirname(dst), exist_ok=True)
-                        with zf.open(match) as src:
-                            with open(dst, "wb") as out:
-                                out.write(src.read())
-                        log(f"[DUPFI] ✅ {wanted}")
-                        extracted += 1
+                        data_bytes = zf.read(match)
+                        inner_path = f"apps/{name}/{wanted}"
+                        if _vfs.write("disk2", inner_path, data_bytes):
+                            log(f"[DUPFI] ✅ {wanted}")
+                            extracted += 1
+                        else:
+                            log(f"[DUPFI] ⛔ write fail: {wanted}")
                     except Exception as e:
                         log(f"[DUPFI] ⛔ {wanted}: {e}")
     except Exception as e:
         log(f"[DUPFI] ⛔ Ошибка распаковки: {e}")
         return False
 
+    # Копируем .dupfi манифест в DRXFS
     try:
-        shutil.copy2(dupfi_path, os.path.join(target, f"{name}.dupfi"))
-        log(f"[DUPFI] ✅ {name}.dupfi")
+        with open(dupfi_path, "rb") as f:
+            _vfs.write("disk2", f"apps/{name}/{name}.dupfi", f.read())
+        log(f"[DUPFI] ✅ {name}.dupfi → apps/{name}/")
     except Exception:
         pass
 
-    installed = _load_installed()
+    # Запись в реестр (в DRXFS + локально)
     installed_by = "unknown"
     if HAS_ACCESS:
         installed_by = access.get_session().username
 
-    installed[name] = {
+    entry = {
         "version": version,
         "author": author,
         "git": git_url,
@@ -366,24 +334,45 @@ def _install(dupfi_path, log=print):
         "installed_by": installed_by,
         "extracted": extracted,
     }
+
+    # Реестр в DRXFS
+    try:
+        reg_raw = _vfs.read("disk0", "system/installed.json")
+        registry = {}
+        if reg_raw:
+            try:
+                registry = json.loads(reg_raw.decode("utf-8"))
+            except Exception:
+                registry = {}
+        registry[name] = entry
+        _vfs.write("disk0", "system/installed.json",
+                   json.dumps(registry, indent=2, ensure_ascii=False))
+    except Exception as e:
+        log(f"[DUPFI] ⚠ реестр DRXFS: {e}")
+
+    # Реестр локальный (для обратной совместимости)
+    installed = _load_installed()
+    installed[name] = entry
     _save_installed(installed)
 
+    # Чистка временного архива
     try:
-        os.remove(archive_path)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
     except Exception:
         pass
 
     log(f"\n[DUPFI] ✅ Установлено: {name} v{version}")
-    log(f"[DUPFI] 📁 {target}")
+    log(f"[DUPFI] 📁 disk2:/apps/{name}/")
     log(f"[DUPFI] 📦 Извлечено: {extracted}/{len(files)}")
     return True
 
 
-# ============================================================
-# Удаление
-# ============================================================
 def _remove(name, log=print):
     if not _check("remove_package", log):
+        return
+
+    if not HAS_VFS:
+        log("[DUPFI] ⛔ VFS недоступен")
         return
 
     installed = _load_installed()
@@ -398,25 +387,51 @@ def _remove(name, log=print):
             log(f"[DUPFI] ⛔ Нельзя удалить системный пакет")
             return
 
-    target = os.path.join(APPS_DIR, name)
-    if os.path.isdir(target):
-        shutil.rmtree(target, ignore_errors=True)
-        log(f"[DUPFI] 🗑 Удалена папка: {target}")
+    # Удаление из DRXFS
+    try:
+        _vfs.delete("disk2", f"apps/{name}")
+        log(f"[DUPFI] 🗑 Удалено из disk2:/apps/{name}")
+    except Exception as e:
+        log(f"[DUPFI] ⚠ DRXFS delete: {e}")
 
+    # Удаление из реестра DRXFS
+    try:
+        reg_raw = _vfs.read("disk0", "system/installed.json")
+        if reg_raw:
+            registry = json.loads(reg_raw.decode("utf-8"))
+            if name in registry:
+                del registry[name]
+                _vfs.write("disk0", "system/installed.json",
+                           json.dumps(registry, indent=2, ensure_ascii=False))
+    except Exception:
+        pass
+
+    # Удаление из локального реестра
     del installed[name]
     _save_installed(installed)
+
     log(f"[DUPFI] ✅ Удалено: {name}")
 
 
-# ============================================================
-# Список
-# ============================================================
 def _list_installed(log=print):
     if not _check("view_installed", log):
         return
 
     installed = _load_installed()
     if not installed:
+        # Пробуем через VFS
+        if HAS_VFS:
+            try:
+                items = _vfs.list_dir("disk2", "apps")
+                dirs = [n for k, n, s in items if k == "dir"]
+                if dirs:
+                    log(f"\n[DUPFI] Приложения в disk2:/apps/ ({len(dirs)}):")
+                    for name in sorted(dirs):
+                        log(f"  • {name}")
+                    log("")
+                    return
+            except Exception:
+                pass
         log("[DUPFI] Пакетов нет.")
         return
 
@@ -449,16 +464,13 @@ def _show_info(path, log=print):
     log("")
 
 
-# ============================================================
-# Slash-команда /dupfi
-# ============================================================
 def slash_dupfi(kernel, args):
     if not args:
         s_info = ""
         if HAS_ACCESS:
             s = access.get_session()
             s_info = f"Сессия: {s.username} (L{s.level} {s.level_name()})\n"
-        print("DreamUX Paket Installer")
+        print("DreamUX Paket Installer (DRXFS)")
         print(s_info)
         print("  /dupfi install <файл|url>   — установить")
         print("  /dupfi remove <имя>         — удалить")
@@ -466,6 +478,7 @@ def slash_dupfi(kernel, args):
         print("  /dupfi info <файл>          — манифест")
         print("  /dupfi whoami               — права")
         print()
+        print("Установка: disk2:/apps/<name>/")
         print("Архивы: .zip, .duap")
         print()
         return
@@ -532,9 +545,6 @@ def slash_dupfi(kernel, args):
         print(f"[DUPFI] ⛔ Неизвестная команда: {cmd}")
 
 
-# ============================================================
-# Slash-команда /duap
-# ============================================================
 def slash_duap(kernel, args):
     if not HAS_DUAP:
         print("[DUAP] ⛔ Модуль duap.py не загружен")
@@ -639,18 +649,13 @@ def slash_duap(kernel, args):
         print(f"[DUAP] ⛔ Неизвестная команда: {cmd}")
 
 
-# ============================================================
-# Регистрация
-# ============================================================
 def register(kernel):
     kernel.register_slash_command(
-        "dupfi",
-        slash_dupfi,
-        "DreamUX Paket Installer — .dupfi/.duap/.zip",
+        "dupfi", slash_dupfi,
+        "DreamUX Paket Installer — .dupfi/.duap/.zip → DRXFS",
     )
     kernel.register_slash_command(
-        "duap",
-        slash_duap,
+        "duap", slash_duap,
         "DreamUX Archive Paket — работа с .duap",
     )
     return []
