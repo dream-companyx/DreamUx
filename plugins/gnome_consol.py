@@ -1,9 +1,4 @@
-"""
-DreamUX GNOME Consol — объединённая консоль.
-Запускает GNOME GUI отдельным процессом. Показывает логи GUI в консоли.
-
-Запуск: /gconsol [username]
-"""
+"""DreamUX GNOME Consol — консоль + GUI + логи."""
 
 import os
 import sys
@@ -47,12 +42,10 @@ class GnomeConsol(Interface):
         print("=" * 60)
         if self.username:
             print(f"  Пользователь: {self.username}")
-        print("  Всё в одной консоли:")
         print("    <команда>           — команда ядра")
-        print("    /<команда>          — slash-команда ядра (/dupfi, /disks)")
-        print("    /gnome <команда>    — команда GNOME")
+        print("    /<команда>          — slash-команда ядра")
         print("    user <имя>          — сменить пользователя")
-        print("    logs                — показать логи")
+        print("    logs                — логи GUI")
         print("    clear_logs          — очистить логи")
         print("    exit                — закрыть")
         print("=" * 60)
@@ -63,23 +56,18 @@ class GnomeConsol(Interface):
             self._started_once = True
             self._launch_gnome(kernel)
             return False
-
         line = line.strip()
         if not line:
             return False
-
         if line in ("exit", "/exit", "quit"):
             self._stop_gnome()
             return True
-
         if line == "logs":
             self._show_logs()
             return False
-
         if line == "clear_logs":
             self._clear_logs()
             return False
-
         if line.lower().startswith("user "):
             new_user = line.split(maxsplit=1)[1].strip()
             self.username = new_user
@@ -89,14 +77,12 @@ class GnomeConsol(Interface):
             self._launch_gnome(kernel)
             self._started_once = True
             return False
-
         if line.startswith("/"):
             parts = line[1:].split()
             if not parts:
                 return False
             token = parts[0].lower()
             args = parts[1:]
-
             if token in ("exit", "halt"):
                 self._stop_gnome()
                 return True
@@ -106,11 +92,9 @@ class GnomeConsol(Interface):
             if token == "logs":
                 self._show_logs()
                 return False
-
             if token == "gnome":
                 self._send_to_gui(" ".join(args))
                 return False
-
             entry = kernel.slash_commands.get(token)
             if entry:
                 try:
@@ -118,10 +102,8 @@ class GnomeConsol(Interface):
                 except Exception as e:
                     print(f"[ошибка /{token}] {e}")
                 return False
-
             print(f"Неизвестная /команда: /{token}")
             return False
-
         parts = line.split()
         name, args = parts[0], parts[1:]
         cmd = kernel.commands.get(name)
@@ -132,65 +114,53 @@ class GnomeConsol(Interface):
                 print(f"[ошибка команды] {e}")
         else:
             print(f"Неизвестная команда: {name}")
-            print("Подсказка: help, logs, /gnome <cmd>, exit")
         return False
 
     def _launch_gnome(self, kernel):
         print("[consol] Запуск GNOME...")
-
         try:
             import PyQt6  # noqa
         except ImportError:
             print("[consol] ⛔ PyQt6 не установлен")
             self._running = False
             return
-
         if not os.path.isfile(GUI_FILE):
             print(f"[consol] ⛔ Не найден {GUI_FILE}")
             self._running = False
             return
-
         os.makedirs(LOGS_DIR, exist_ok=True)
-
         stderr_path = os.path.join(LOGS_DIR, "gnome_stderr.log")
         try:
             with open(stderr_path, "w", encoding="utf-8") as f:
                 f.write("")
         except Exception:
             pass
-
         env = os.environ.copy()
         env["PYTHONPATH"] = os.pathsep.join(
-            [GNOME_DIR, PLUGIN_DIR, env.get("PYTHONPATH", "")]
+            [GNOME_DIR, PLUGIN_DIR, KERNEL_DIR, env.get("PYTHONPATH", "")]
         )
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
         env["SIMPLEOS_GNOME_DIR"] = GNOME_DIR
         env["SIMPLEOS_PLUGIN_DIR"] = PLUGIN_DIR
         env["SIMPLEOS_LOGS_DIR"] = LOGS_DIR
-
         if self.username:
             env["SIMPLEOS_USERNAME"] = self.username
             print(f"[consol] Пользователь: {self.username}")
-
         try:
             log_f = open(stderr_path, "a", encoding="utf-8")
             self._gui_proc = subprocess.Popen(
                 [sys.executable, GUI_FILE],
-                cwd=GNOME_DIR,
-                env=env,
-                stdout=log_f,
-                stderr=subprocess.STDOUT,
+                cwd=GNOME_DIR, env=env,
+                stdout=log_f, stderr=subprocess.STDOUT,
             )
             log_f.close()
         except Exception as e:
-            print(f"[consol] ⛔ Ошибка запуска: {e}")
+            print(f"[consol] ⛔ {e}")
             self._running = False
             return
-
         self._running = True
         print(f"[consol] ✅ GNOME запущен (PID={self._gui_proc.pid})")
-
         for name in LOG_FILES_TO_WATCH:
             path = os.path.join(LOGS_DIR, name)
             try:
@@ -199,19 +169,11 @@ class GnomeConsol(Interface):
                 )
             except Exception:
                 self._log_positions[name] = 0
-
-        self._log_thread = threading.Thread(
-            target=self._watch_logs, daemon=True
-        )
+        self._log_thread = threading.Thread(target=self._watch_logs, daemon=True)
         self._log_thread.start()
-
-        self._monitor_thread = threading.Thread(
-            target=self._monitor_gui, daemon=True
-        )
+        self._monitor_thread = threading.Thread(target=self._monitor_gui, daemon=True)
         self._monitor_thread.start()
-
-        print("[consol] Логи интерфейса видны в этой консоли")
-        print()
+        print("[consol] Логи интерфейса видны в этой консоли\n")
 
     def _watch_logs(self):
         while self._running:
@@ -224,8 +186,7 @@ class GnomeConsol(Interface):
                     size = os.path.getsize(path)
                     last = self._log_positions.get(name, 0)
                     if size > last:
-                        with open(path, "r", encoding="utf-8",
-                                  errors="replace") as f:
+                        with open(path, "r", encoding="utf-8", errors="replace") as f:
                             f.seek(last)
                             new = f.read()
                         self._log_positions[name] = size
@@ -242,8 +203,7 @@ class GnomeConsol(Interface):
             if self._gui_proc is None:
                 break
             if self._gui_proc.poll() is not None:
-                print(f"\n[consol] GNOME закрыт "
-                      f"(код={self._gui_proc.returncode})")
+                print(f"\n[consol] GNOME закрыт (код={self._gui_proc.returncode})")
                 self._running = False
                 break
             time.sleep(1)
@@ -283,8 +243,7 @@ class GnomeConsol(Interface):
             if not os.path.isfile(path):
                 continue
             try:
-                with open(path, "r", encoding="utf-8",
-                          errors="replace") as f:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()
                 tail = lines[-20:]
                 if not tail:
@@ -336,13 +295,8 @@ def slash_gconsol(kernel, args):
 
 
 def register(kernel):
-    kernel.register_interface(
-        GnomeConsol(),
-        aliases=["gconsol", "gnome_consol"],
-    )
+    kernel.register_interface(GnomeConsol(),
+                              aliases=["gconsol", "gnome_consol"])
     kernel.register_slash_command(
-        "gconsol",
-        slash_gconsol,
-        "GNOME Consol — /gconsol [username]",
-    )
+        "gconsol", slash_gconsol, "GNOME Consol — /gconsol [username]")
     return []
