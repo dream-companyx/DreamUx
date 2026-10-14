@@ -68,13 +68,12 @@ class Kernel:
         try:
             from plugins import vfs
             if not vfs.is_initialized():
-                print("\n[KERNEL] Первый запуск — создаю виртуальные диски...")
-                vfs.initialize_vfs(log=print)
-                self.vfs_initialized = True
+                print("\n[KERNEL] VFS не инициализирована.")
+                print("[KERNEL] Запусти setup_wizard.py для создания дисков.")
             else:
-                print("[KERNEL] VFS уже инициализировано.")
-        except ImportError:
-            print("[KERNEL] Модуль vfs.py не найден")
+                print("[KERNEL] VFS инициализирована.")
+        except ImportError as e:
+            print(f"[KERNEL] Модуль vfs.py не найден: {e}")
 
     def _try_load_dll(self, module_name, dll_path):
         try:
@@ -96,22 +95,16 @@ class Kernel:
 
     def load_plugin(self, module_name):
         print(f"[DEBUG] load_plugin({module_name})")
-
         dll_path = os.path.join(_PLUGINS, module_name + ".dll")
         py_path = os.path.join(_PLUGINS, module_name + ".py")
-
         module = None
-
         if os.path.isfile(dll_path):
             module = self._try_load_dll(module_name, dll_path)
-
         if module is None and os.path.isfile(py_path):
             module = self._try_load_py(module_name)
-
         if module is None:
             print(f"[!] Плагин не найден: {module_name}")
             return
-
         if hasattr(module, "register"):
             try:
                 result = module.register(self)
@@ -121,7 +114,6 @@ class Kernel:
                 import traceback
                 print(f"[DEBUG]   register() упал:")
                 traceback.print_exc()
-
         self.loaded_plugins.append(module_name)
         print(f"[+] Плагин загружен: {module_name}")
 
@@ -156,27 +148,20 @@ class Kernel:
     def load_all_apps(self):
         if not os.path.isdir(_APPS):
             return
-
         for entry in sorted(os.scandir(_APPS), key=lambda e: e.name):
             if not entry.is_dir():
                 continue
             name = entry.name
-
             dll_path = os.path.join(entry.path, f"{name}.dll")
             py_path = os.path.join(entry.path, f"{name}.py")
-
             module = None
-
             if os.path.isfile(dll_path):
                 module = self._try_load_app_dll(name, dll_path)
-
             if module is None and os.path.isfile(py_path):
                 module = self._try_load_app_py(name, py_path)
-
             if module is None:
                 print(f"[!] App {name}: нет ни .dll, ни .py")
                 continue
-
             if hasattr(module, "register"):
                 try:
                     module.register(self)
@@ -190,12 +175,9 @@ class Kernel:
         print("   SimpleConsoleOS v2.5.0  —  DreamUX")
         print("   'help'                — список команд")
         print("   '/interface <номер>'  — интерфейс по номеру")
-        print("   '/gnome [username]'   — запустить GNOME")
-        print("   '/gui'                — управление GUI")
-        print("   '/testgnome'          — диагностика GNOME")
-        print("   '/update'             — проверка обновлений")
-        print("   '/remote'             — RemoteTools")
-        print("   '/disks'              — виртуальные диски")
+        print("   '/gnome'              — запустить GNOME")
+        print("   '/gui start'          — запустить GUI вручную")
+        print("   '/vfs info'           — состояние DRXFS")
         print("   '/dupfi'              — установщик пакетов")
         print("   '/help'               — все /команды")
         print("=" * 46)
@@ -227,7 +209,6 @@ class Kernel:
                 break
             if not line:
                 continue
-
             if line.startswith("/"):
                 parts = line[1:].split()
                 if not parts:
@@ -235,16 +216,13 @@ class Kernel:
                     continue
                 token = parts[0].lower()
                 args = parts[1:]
-
                 if token in ("exit", "halt", "shutdown"):
                     print("Система выключена. Пока!")
                     self.running = False
                     continue
-
                 if token == "help":
                     self._print_slash_help()
                     continue
-
                 if token == "interface":
                     if not args or not args[0].isdigit():
                         print("Использование: /interface <номер>")
@@ -257,7 +235,6 @@ class Kernel:
                         continue
                     self.run_interface(iface)
                     continue
-
                 if token.startswith("interface"):
                     name = token[len("interface"):]
                     if not name:
@@ -271,7 +248,6 @@ class Kernel:
                         continue
                     self.run_interface(iface)
                     continue
-
                 entry = self.slash_commands.get(token)
                 if entry is None:
                     print(f"Неизвестная /команда: /{token}")
@@ -284,7 +260,6 @@ class Kernel:
                     print(f"[ошибка /{token}] {e}")
                     traceback.print_exc()
                 continue
-
             parts = line.split()
             name, args = parts[0], parts[1:]
             cmd = self.commands.get(name)
@@ -339,69 +314,53 @@ class Kernel:
         self.load_all_apps()
         print()
 
-        # === АВТОЗАПУСК GUI (после полной инициализации ядра) ===
+        # Автозапуск GUI через gui_server
         try:
             from plugins import gui_server
             server = gui_server.get_server(self)
             if server:
                 server.start_server()
                 server.start_gui()
-                print("[KERNEL] ✅ GUI запущен через плагин")
+                print("[KERNEL] ✅ GUI запущен через gui_server")
         except ImportError:
-            print("[KERNEL] Плагин gui_server не найден — GUI не запущен")
+            print("[KERNEL] Плагин gui_server не найден")
         except Exception as e:
             import traceback
             print(f"[KERNEL] ⚠ GUI autostart: {e}")
             traceback.print_exc()
-        # ========================================================
-
-        self.repl()
-
-        # При выходе — гасим GUI и VHD
-        try:
-            from plugins import gui_server
-            server = gui_server.get_server()
-            if server:
-                server.shutdown()
-        except Exception:
-            pass
 
         try:
-            from plugins import vfs
-            vfs.shutdown(log=print)
-        except Exception:
-            pass
-
+            self.repl()
+        finally:
+            try:
+                from plugins import gui_server
+                server = gui_server.get_server()
+                if server:
+                    server.shutdown()
+            except Exception:
+                pass
         print("Система остановлена.")
 
 
 if __name__ == "__main__":
     try:
         args = sys.argv[1:]
-
         if len(args) >= 2 and args[0] == "--install-dupfi":
             path = args[1]
             kernel = Kernel()
             kernel.init_vfs()
             kernel.load_all_plugins()
             if "dupfi" in kernel.slash_commands:
-                kernel.slash_commands["dupfi"]["handler"](
-                    kernel, ["install", path]
-                )
+                kernel.slash_commands["dupfi"]["handler"](kernel, ["install", path])
             sys.exit(0)
-
         if len(args) >= 2 and args[0] == "--open-duap":
             path = args[1]
             kernel = Kernel()
             kernel.init_vfs()
             kernel.load_all_plugins()
             if "duap" in kernel.slash_commands:
-                kernel.slash_commands["duap"]["handler"](
-                    kernel, ["info", path]
-                )
+                kernel.slash_commands["duap"]["handler"](kernel, ["info", path])
             sys.exit(0)
-
         Kernel().boot()
-
     except KeyboardInterrupt:
         sys.exit(0)
